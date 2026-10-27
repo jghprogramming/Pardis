@@ -22,6 +22,11 @@ type Unit = {
   phone: string | null;
 };
 
+type LinkedProfile = {
+  id: string;
+  full_name: string | null;
+};
+
 // Building detail + units.
 // Who may do what is enforced by 002_rls.sql:
 // - product_owner and the building's manager may add and delete units
@@ -40,11 +45,15 @@ export default function BuildingDetailPage({
   const [checked, setChecked] = useState(false);
   const [building, setBuilding] = useState<Building | null>(null);
   const [units, setUnits] = useState<Unit[]>([]);
+  const [managers, setManagers] = useState<LinkedProfile[]>([]);
+  const [residents, setResidents] = useState<LinkedProfile[]>([]);
+  const [managerId, setManagerId] = useState("");
   const [unitNo, setUnitNo] = useState("");
   const [area, setArea] = useState("");
   const [occupants, setOccupants] = useState("1");
   const [residentName, setResidentName] = useState("");
   const [residentType, setResidentType] = useState("");
+  const [residentId, setResidentId] = useState("");
   const [phone, setPhone] = useState("");
   const [message, setMessage] = useState("");
 
@@ -59,12 +68,43 @@ export default function BuildingDetailPage({
       .eq("id", buildingId)
       .single();
     setBuilding((buildingRow ?? null) as Building | null);
+    setManagerId((buildingRow as Building | null)?.manager_id ?? "");
     const { data: unitRows } = await supabase
       .from("units")
       .select("id, unit_no, area, occupants, resident_name, resident_type, phone")
       .eq("building_id", buildingId)
       .order("unit_no");
     setUnits((unitRows ?? []) as Unit[]);
+    // Only the product owner can read all profiles (002_rls.sql), so
+    // the manager/resident pickers below are owner-only in practice.
+    if (current.role === "product_owner") {
+      const { data: managerRows } = await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .eq("role", "building_manager")
+        .order("full_name");
+      setManagers((managerRows ?? []) as LinkedProfile[]);
+      const { data: residentRows } = await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .eq("role", "resident")
+        .order("full_name");
+      setResidents((residentRows ?? []) as LinkedProfile[]);
+    }
+  }
+
+  async function updateManager(e: FormEvent) {
+    e.preventDefault();
+    const { error } = await supabase
+      .from("buildings")
+      .update({ manager_id: managerId || null })
+      .eq("id", buildingId);
+    if (error) {
+      setMessage(`خطا: ${error.message}`);
+    } else {
+      setMessage("مدیر ساختمان تغییر کرد.");
+      load();
+    }
   }
 
   useEffect(() => {
@@ -81,6 +121,7 @@ export default function BuildingDetailPage({
       occupants: Number(occupants),
       resident_name: residentName || null,
       resident_type: residentType || null,
+      resident_id: residentId || null,
       phone: phone || null,
     });
     if (error) {
@@ -92,6 +133,7 @@ export default function BuildingDetailPage({
       setOccupants("1");
       setResidentName("");
       setResidentType("");
+      setResidentId("");
       setPhone("");
       load();
     }
@@ -142,6 +184,24 @@ export default function BuildingDetailPage({
       <h1>{building.name}</h1>
       {building.address && <p>{building.address}</p>}
 
+      {profile.role === "product_owner" && (
+        <form onSubmit={updateManager} style={{ display: "grid", gap: 12 }}>
+          <label>مدیر ساختمان</label>
+          <select
+            value={managerId}
+            onChange={(e) => setManagerId(e.target.value)}
+          >
+            <option value="">بدون مدیر (بعداً تعیین می‌شود)</option>
+            {managers.map((manager) => (
+              <option key={manager.id} value={manager.id}>
+                {manager.full_name || manager.id}
+              </option>
+            ))}
+          </select>
+          <button type="submit">تغییر مدیر ساختمان</button>
+        </form>
+      )}
+
       <h2>واحدها</h2>
       {canWrite && (
         <form onSubmit={createUnit} style={{ display: "grid", gap: 12 }}>
@@ -178,6 +238,19 @@ export default function BuildingDetailPage({
             <option value="owner">مالک</option>
             <option value="tenant">مستأجر</option>
           </select>
+          {profile.role === "product_owner" && (
+            <select
+              value={residentId}
+              onChange={(e) => setResidentId(e.target.value)}
+            >
+              <option value="">بدون حساب ساکن (فقط نام و تلفن)</option>
+              {residents.map((resident) => (
+                <option key={resident.id} value={resident.id}>
+                  {resident.full_name || resident.id}
+                </option>
+              ))}
+            </select>
+          )}
           <input
             placeholder="تلفن ساکن"
             value={phone}

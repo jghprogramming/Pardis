@@ -17,6 +17,11 @@ type Plan = {
   name: string;
 };
 
+type ManagerProfile = {
+  id: string;
+  full_name: string | null;
+};
+
 // Buildings module, list + create.
 // Access is enforced by the database (002_rls.sql), not only here:
 // - product_owner sees all buildings and may create them;
@@ -29,8 +34,10 @@ export default function BuildingsPage() {
   const [checked, setChecked] = useState(false);
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [managers, setManagers] = useState<ManagerProfile[]>([]);
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
+  const [managerId, setManagerId] = useState("");
   const [planId, setPlanId] = useState("");
   const [message, setMessage] = useState("");
 
@@ -50,6 +57,16 @@ export default function BuildingsPage() {
       .eq("active", true)
       .order("name");
     setPlans((planRows ?? []) as Plan[]);
+    // Only the product owner can read all profiles (002_rls.sql), so
+    // this list is useful only on the owner-only create form below.
+    if (current.role === "product_owner") {
+      const { data: managerRows } = await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .eq("role", "building_manager")
+        .order("full_name");
+      setManagers((managerRows ?? []) as ManagerProfile[]);
+    }
   }
 
   useEffect(() => {
@@ -61,6 +78,7 @@ export default function BuildingsPage() {
     const { error } = await supabase.from("buildings").insert({
       name,
       address: address || null,
+      manager_id: managerId || null,
       plan_id: planId ? Number(planId) : null,
     });
     if (error) {
@@ -69,6 +87,7 @@ export default function BuildingsPage() {
       setMessage("ساختمان ساخته شد.");
       setName("");
       setAddress("");
+      setManagerId("");
       setPlanId("");
       load();
     }
@@ -100,6 +119,17 @@ export default function BuildingsPage() {
             value={address}
             onChange={(e) => setAddress(e.target.value)}
           />
+          <select
+            value={managerId}
+            onChange={(e) => setManagerId(e.target.value)}
+          >
+            <option value="">بدون مدیر (بعداً تعیین می‌شود)</option>
+            {managers.map((manager) => (
+              <option key={manager.id} value={manager.id}>
+                {manager.full_name || manager.id}
+              </option>
+            ))}
+          </select>
           <select
             value={planId}
             onChange={(e) => setPlanId(e.target.value)}
